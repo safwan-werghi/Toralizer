@@ -2,29 +2,30 @@
 #include "toralize.h"
 #include <stdio.h>
 
-Req *request(const char *dstip,const int dstport){
+
+Req *request(struct sockaddr_in *sock2){
 Req *req ;
 req = malloc(sizeof(Req));
 req->vn = 4;
 req->cd = 1;
-req->dstport = htons(dstport);
-req->dstip = inet_addr(dstip);
+req->dstport = sock2->sin_port;
+req->dstip = sock2->sin_addr.s_addr;
 strncpy(req->userid, USERNAME,8);
 return req;
 };
 
+int connect(int s2, const struct sockaddr *sock2, socklen_t addrlen){
 
-int main(int argc,  char *argv[]) {
-char *host ; // the hostname that w're going to connect to
-int port,s;
+int s;
 struct sockaddr_in sock;
 Req *req;
- if (argc < 3) {
-   fprintf(stderr, "Usage: %s <host> <port>\n",argv[0]);
-   return -1;
- }
-host = argv[1];
-port = atoi(argv[2]);
+Res *res;
+char buf[ressize];
+int success;
+char tmp[512];
+int (*p)(int , const struct sockaddr*,socklen_t);
+
+p = dlsym(RTLD_NEXT,"connect");
 s = socket(AF_INET,SOCK_STREAM,0);
 if (s < 0) {
   perror("socket");
@@ -33,15 +34,31 @@ if (s < 0) {
 sock.sin_family = AF_INET;
 sock.sin_port = htons(PROXYPORT);
 sock.sin_addr.s_addr = inet_addr(PROXY);
-if(connect(s, (struct sockaddr *)&sock, sizeof(sock))){
+if(p(s, (struct sockaddr *)&sock, sizeof(sock))){
   perror("connect");
   return -1;
 }
 printf("Connected to proxy server\n");
-req = request(host,port);
+req = request((struct sockaddr_in *)sock2);
 write(s,req,reqsize);
-
-close(s);
+memset(buf,0,ressize);
+if (read(s,buf,ressize) < 1){
+  perror("read");
+  free(req);
+  close(s);
+  return -1;
+}
+res = (Res *)buf;
+success = (res->cd == 90);
+if(!success){
+  fprintf(stderr,"Proxy server unavailable\n, Error code : %d\n",res->cd);
+  close(s);
+  free(req);
+  return -1;
+}
+printf("Successfully connected through the proxy.\n");
+dup2(s,s2);
+free(req);
 return 0;
 
 }
